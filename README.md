@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GoldRush Portfolio Analyst
 
-## Getting Started
+AI-powered on-chain wallet intelligence. Paste a wallet address → get an instant portfolio breakdown, risk score, and actionable insights generated from GoldRush's decoded blockchain data + GPT-4o-mini reasoning.
 
-First, run the development server:
+Built for the **Build with GoldRush Track** hackathon (Powered by Covalent).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## What it does
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- Fetches full wallet state across Solana, Ethereum, Base, Polygon, BNB Chain via GoldRush APIs
+- Pulls token balances, USD pricing, and transaction history in one pass
+- Feeds the snapshot to an LLM that generates:
+  - Plain-English summary
+  - 0–100 risk score
+  - Concentration analysis
+  - Specific insights, risks, and suggestions
+- Renders it all in a clean dashboard UI
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Why it's different
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Raw RPC providers give you hex. GoldRush gives you **classified, decoded, USD-priced data** — exactly what an LLM needs to reason about. This project is the proof: combine GoldRush's rich data layer with LLM reasoning to ship insights no raw-chain tool can match.
 
-## Learn More
+## GoldRush endpoints used
 
-To learn more about Next.js, take a look at the following resources:
+- `BalanceService.getTokenBalancesForWalletAddress` — token holdings + USD values
+- `TransactionService.getAllTransactionsForAddressByPage` — wallet activity history
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Stack
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Next.js 15 (App Router) + TypeScript
+- Tailwind CSS 4
+- `@covalenthq/client-sdk` for GoldRush
+- `openai` SDK with `gpt-4o-mini`
 
-## Deploy on Vercel
+## Setup
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Install deps:
+   ```bash
+   npm install
+   ```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+2. Add your keys to `.env.local`:
+   ```
+   GOLDRUSH_API_KEY=your_goldrush_key
+   OPENAI_API_KEY=your_openai_key
+   ```
+
+3. Run:
+   ```bash
+   npm run dev
+   ```
+
+4. Open http://localhost:3000, paste a wallet address, pick a chain, hit Analyze.
+
+## Project structure
+
+- `app/page.tsx` — wallet input and results UI
+- `app/api/analyze/route.ts` — orchestration endpoint
+- `lib/goldrush.ts` — GoldRush data fetching + normalization
+- `lib/analyze.ts` — LLM analysis prompt
+
+## Demo
+
+Record a 60–90s video showing:
+1. Pasting a whale wallet
+2. Live fetch + analysis
+3. Walking through the AI-generated risk score and insights
+4. Posting on X with `@goldrushdev` tag
