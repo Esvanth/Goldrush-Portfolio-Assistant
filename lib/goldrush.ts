@@ -1,12 +1,14 @@
 import { GoldRushClient } from "@covalenthq/client-sdk";
 
-const apiKey = process.env.GOLDRUSH_API_KEY;
+let _client: GoldRushClient | null = null;
 
-if (!apiKey) {
-  console.warn("GOLDRUSH_API_KEY is not set");
+function goldrush(): GoldRushClient {
+  if (_client) return _client;
+  const apiKey = process.env.GOLDRUSH_API_KEY;
+  if (!apiKey) throw new Error("GOLDRUSH_API_KEY is not set");
+  _client = new GoldRushClient(apiKey);
+  return _client;
 }
-
-export const goldrush = new GoldRushClient(apiKey ?? "");
 
 export type WalletSnapshot = {
   address: string;
@@ -42,13 +44,14 @@ export async function fetchWalletSnapshot(
   address: string,
   chain: string = "solana-mainnet"
 ): Promise<WalletSnapshot> {
+  const client = goldrush();
   const [balancesRes, txsRes] = await Promise.all([
-    goldrush.BalanceService.getTokenBalancesForWalletAddress(
+    client.BalanceService.getTokenBalancesForWalletAddress(
       chain as never,
       address,
       { quoteCurrency: "USD", noSpam: true }
     ),
-    goldrush.TransactionService.getAllTransactionsForAddressByPage(
+    client.TransactionService.getAllTransactionsForAddressByPage(
       chain as never,
       address,
       { quoteCurrency: "USD", noLogs: true }

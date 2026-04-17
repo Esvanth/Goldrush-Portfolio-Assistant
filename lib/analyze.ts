@@ -1,7 +1,14 @@
 import OpenAI from "openai";
 import type { WalletSnapshot } from "./goldrush";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function openai(): OpenAI {
+  if (_openai) return _openai;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
+  _openai = new OpenAI({ apiKey });
+  return _openai;
+}
 
 export type Analysis = {
   summary: string;
@@ -53,7 +60,7 @@ Return JSON with this exact shape:
   "suggestions": ["2-4 actionable suggestions"]
 }`;
 
-  const res = await openai.chat.completions.create({
+  const res = await openai().chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       {
