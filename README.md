@@ -12,12 +12,12 @@ This is the part judges should see. The score is **deterministic, computed from 
 
 | Signal | Source | Max points |
 |---|---|---|
-| **Concentration** — top holding share | `BalanceService` | 25 |
-| **Approval hygiene** — unlimited approvals, $ exposure | `SecurityService.getApprovals` | 30 |
-| **Volatility cushion** — stablecoin share of portfolio | `BalanceService` | 10 |
-| **Activity signature** — approval-heavy or swap-heavy tx mix | `TransactionService` log_events | 10 |
+| **Concentration** — top holding share (waived if top asset is a stablecoin) | `BalanceService` | 30 |
+| **Approval hygiene** — unlimited-approval count **and** $ exposure | `SecurityService.getApprovals` | 40 |
+| **Volatility cushion** — stablecoin share of portfolio | `BalanceService` | 15 |
+| **Activity signature** — approval-heavy or swap-heavy tx mix | `TransactionService` log_events | 15 |
 
-Score is capped at 100, bucketed into `low` / `moderate` / `elevated`, and shown with a per-component breakdown so you can see *why* a wallet scored where it did.
+Max score is 100, bucketed into `low` (< 25) / `moderate` (25–49) / `elevated` (≥ 50), and shown with a per-component breakdown so you can see *why* a wallet scored where it did.
 
 ## How GoldRush is used
 
