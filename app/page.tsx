@@ -44,17 +44,19 @@ type RiskBreakdown = {
   stableSharePct: number;
 };
 
+type Snapshot = {
+  address: string;
+  chain: string;
+  isEvm: boolean;
+  totalUsd: number;
+  tokens: Token[];
+  txCount: number;
+  txMix: TxMix;
+  approvals: ApprovalRisk[];
+};
+
 type AnalyzeResponse = {
-  snapshot: {
-    address: string;
-    chain: string;
-    isEvm: boolean;
-    totalUsd: number;
-    tokens: Token[];
-    txCount: number;
-    txMix: TxMix;
-    approvals: ApprovalRisk[];
-  };
+  snapshot: Snapshot;
   analysis: {
     summary: string;
     riskScore: number;
@@ -65,6 +67,23 @@ type AnalyzeResponse = {
     risks: string[];
     suggestions: string[];
   };
+};
+
+type WalletReport = {
+  address: string;
+  snapshot: Snapshot;
+  risk: RiskBreakdown;
+};
+
+type CompareResponse = {
+  chain: string;
+  a: WalletReport;
+  b: WalletReport;
+  delta: number;
+  riskier: "A" | "B" | "tie";
+  driverLabel: string;
+  driverDelta: number;
+  verdict: string;
 };
 
 const CATEGORY_LABELS: Record<TxCategory, string> = {
@@ -130,18 +149,27 @@ function formatUsd(n: number) {
 }
 
 export default function Home() {
+  const [mode, setMode] = useState<"analyze" | "compare">("analyze");
   const [address, setAddress] = useState("");
+  const [addressA, setAddressA] = useState("");
+  const [addressB, setAddressB] = useState("");
   const [chain, setChain] = useState("solana-mainnet");
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<AnalyzeResponse | null>(null);
+  const [compareData, setCompareData] = useState<CompareResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  function resetResults() {
+    setData(null);
+    setCompareData(null);
+    setError(null);
+  }
 
   async function analyze(e?: React.FormEvent) {
     e?.preventDefault();
     if (!address.trim()) return;
     setLoading(true);
-    setError(null);
-    setData(null);
+    resetResults();
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -159,8 +187,45 @@ export default function Home() {
     }
   }
 
+  async function compare(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!addressA.trim() || !addressB.trim()) return;
+    setLoading(true);
+    resetResults();
+    try {
+      const res = await fetch("/api/compare", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          addressA: addressA.trim(),
+          addressB: addressB.trim(),
+          chain,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Request failed");
+      setCompareData(json);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function loadSample() {
     setAddress(SAMPLE[chain] ?? SAMPLE["eth-mainnet"]);
+  }
+
+  function loadSampleCompare() {
+    const base = SAMPLE[chain] ?? SAMPLE["eth-mainnet"];
+    setAddressA(base);
+    // Use vitalik.eth as B on EVM chains, a known high-activity SOL on Solana
+    setAddressB(
+      chain.startsWith("solana")
+        ? "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"
+        : "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+    );
   }
 
   const chainLabel = CHAINS.find((c) => c.id === chain)?.label ?? chain;
@@ -200,72 +265,126 @@ export default function Home() {
           </p>
         </section>
 
-        {/* Form */}
-        <form
-          onSubmit={analyze}
-          className="border hairline-strong bg-[color:var(--panel)] p-4 sm:p-5 mb-12"
-        >
-          <div className="grid sm:grid-cols-[160px_1fr_auto] gap-3">
-            <label className="flex flex-col gap-1.5">
-              <span className="smallcaps">Chain</span>
-              <div className="relative">
-                <select
-                  value={chain}
-                  onChange={(e) => setChain(e.target.value)}
-                  className="h-11 w-full appearance-none bg-transparent border hairline px-3 pr-8 text-sm text-[color:var(--ink)] focus:outline-none focus:border-[color:var(--brass)] transition cursor-pointer"
-                >
-                  {CHAINS.map((c) => (
-                    <option key={c.id} value={c.id} className="bg-[color:var(--panel)]">
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                <svg
-                  className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[color:var(--ink-muted)]"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.06l3.71-3.83a.75.75 0 1 1 1.08 1.04l-4.25 4.39a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </div>
-            </label>
+        {/* Mode toggle */}
+        <div className="mb-4 flex items-center gap-5 border-b hairline pb-2">
+          {(["analyze", "compare"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setMode(m);
+                resetResults();
+              }}
+              className={`smallcaps pb-1 -mb-[1px] border-b-[1px] transition ${
+                mode === m
+                  ? "text-[color:var(--ink)] border-[color:var(--brass)]"
+                  : "text-[color:var(--ink-muted)] border-transparent hover:text-[color:var(--ink-dim)]"
+              }`}
+            >
+              {m === "analyze" ? "Analyze one" : "Compare two"}
+            </button>
+          ))}
+        </div>
 
-            <label className="flex flex-col gap-1.5 min-w-0">
-              <div className="flex items-center justify-between">
-                <span className="smallcaps">Wallet address</span>
+        {/* Form */}
+        {mode === "analyze" ? (
+          <form
+            onSubmit={analyze}
+            className="border hairline-strong bg-[color:var(--panel)] p-4 sm:p-5 mb-12"
+          >
+            <div className="grid sm:grid-cols-[160px_1fr_auto] gap-3">
+              <label className="flex flex-col gap-1.5">
+                <span className="smallcaps">Chain</span>
+                <ChainSelect value={chain} onChange={setChain} />
+              </label>
+
+              <label className="flex flex-col gap-1.5 min-w-0">
+                <div className="flex items-center justify-between">
+                  <span className="smallcaps">Wallet address</span>
+                  <button
+                    type="button"
+                    onClick={loadSample}
+                    className="smallcaps text-[color:var(--brass)] hover:text-[color:var(--ink)] transition"
+                  >
+                    Load sample →
+                  </button>
+                </div>
+                <input
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder={`Paste a ${chainLabel} address`}
+                  spellCheck={false}
+                  className="h-11 w-full bg-transparent border hairline px-3 text-sm font-mono text-[color:var(--ink)] placeholder:text-[color:var(--ink-muted)] focus:outline-none focus:border-[color:var(--brass)] transition"
+                />
+              </label>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="smallcaps opacity-0 hidden sm:block">Go</span>
                 <button
-                  type="button"
-                  onClick={loadSample}
-                  className="smallcaps text-[color:var(--brass)] hover:text-[color:var(--ink)] transition"
+                  type="submit"
+                  disabled={loading || !address.trim()}
+                  className="h-11 px-6 text-sm font-medium bg-[color:var(--ink)] text-[#0b0b0d] hover:bg-[color:var(--brass)] transition disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Load sample →
+                  {loading ? "Analyzing…" : "Analyze ↵"}
                 </button>
               </div>
-              <input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder={`Paste a ${chainLabel} address`}
-                spellCheck={false}
-                className="h-11 w-full bg-transparent border hairline px-3 text-sm font-mono text-[color:var(--ink)] placeholder:text-[color:var(--ink-muted)] focus:outline-none focus:border-[color:var(--brass)] transition"
-              />
-            </label>
+            </div>
+          </form>
+        ) : (
+          <form
+            onSubmit={compare}
+            className="border hairline-strong bg-[color:var(--panel)] p-4 sm:p-5 mb-12"
+          >
+            <div className="grid sm:grid-cols-[160px_1fr] gap-3 mb-3">
+              <label className="flex flex-col gap-1.5">
+                <span className="smallcaps">Chain</span>
+                <ChainSelect value={chain} onChange={setChain} />
+              </label>
+              <div className="flex items-end justify-end">
+                <button
+                  type="button"
+                  onClick={loadSampleCompare}
+                  className="smallcaps text-[color:var(--brass)] hover:text-[color:var(--ink)] transition"
+                >
+                  Load sample pair →
+                </button>
+              </div>
+            </div>
 
-            <div className="flex flex-col gap-1.5">
-              <span className="smallcaps opacity-0 hidden sm:block">Go</span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1.5 min-w-0">
+                <span className="smallcaps">Wallet A</span>
+                <input
+                  value={addressA}
+                  onChange={(e) => setAddressA(e.target.value)}
+                  placeholder={`Paste a ${chainLabel} address`}
+                  spellCheck={false}
+                  className="h-11 w-full bg-transparent border hairline px-3 text-sm font-mono text-[color:var(--ink)] placeholder:text-[color:var(--ink-muted)] focus:outline-none focus:border-[color:var(--brass)] transition"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5 min-w-0">
+                <span className="smallcaps">Wallet B</span>
+                <input
+                  value={addressB}
+                  onChange={(e) => setAddressB(e.target.value)}
+                  placeholder={`Paste a ${chainLabel} address`}
+                  spellCheck={false}
+                  className="h-11 w-full bg-transparent border hairline px-3 text-sm font-mono text-[color:var(--ink)] placeholder:text-[color:var(--ink-muted)] focus:outline-none focus:border-[color:var(--brass)] transition"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 flex justify-end">
               <button
                 type="submit"
-                disabled={loading || !address.trim()}
+                disabled={loading || !addressA.trim() || !addressB.trim()}
                 className="h-11 px-6 text-sm font-medium bg-[color:var(--ink)] text-[#0b0b0d] hover:bg-[color:var(--brass)] transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {loading ? "Analyzing…" : "Analyze ↵"}
+                {loading ? "Comparing…" : "Compare ↵"}
               </button>
             </div>
-          </div>
-        </form>
+          </form>
+        )}
 
         {error && (
           <div className="border hairline-strong border-l-2 border-l-[color:var(--neg)] bg-[color:var(--panel)] px-4 py-3 mb-10 text-sm">
@@ -275,8 +394,11 @@ export default function Home() {
         )}
 
         {loading && <LoadingState />}
-        {!loading && !data && !error && <EmptyState />}
+        {!loading && !data && !compareData && !error && <EmptyState />}
         {data && <Results data={data} chainLabel={chainLabel} />}
+        {compareData && (
+          <CompareResults data={compareData} chainLabel={chainLabel} />
+        )}
 
         <footer className="mt-20 pt-6 border-t hairline flex items-center justify-end smallcaps">
           <div>© {new Date().getFullYear()} · All rights reserved</div>
@@ -960,4 +1082,309 @@ function Td({
   className?: string;
 }) {
   return <td className={`px-4 py-3 align-middle ${className}`}>{children}</td>;
+}
+
+function ChainSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-11 w-full appearance-none bg-transparent border hairline px-3 pr-8 text-sm text-[color:var(--ink)] focus:outline-none focus:border-[color:var(--brass)] transition cursor-pointer"
+      >
+        {CHAINS.map((c) => (
+          <option
+            key={c.id}
+            value={c.id}
+            className="bg-[color:var(--panel)]"
+          >
+            {c.label}
+          </option>
+        ))}
+      </select>
+      <svg
+        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[color:var(--ink-muted)]"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+      >
+        <path
+          fillRule="evenodd"
+          d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.06l3.71-3.83a.75.75 0 1 1 1.08 1.04l-4.25 4.39a.75.75 0 0 1-1.08 0L5.21 8.27a.75.75 0 0 1 .02-1.06z"
+          clipRule="evenodd"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function severityColor(severity: "low" | "moderate" | "elevated") {
+  return severity === "elevated"
+    ? "var(--neg)"
+    : severity === "moderate"
+      ? "var(--brass)"
+      : "var(--pos)";
+}
+
+function severityLabel(severity: "low" | "moderate" | "elevated") {
+  return severity === "elevated"
+    ? "Elevated"
+    : severity === "moderate"
+      ? "Moderate"
+      : "Contained";
+}
+
+function CompareResults({
+  data,
+  chainLabel,
+}: {
+  data: CompareResponse;
+  chainLabel: string;
+}) {
+  const absDelta = Math.abs(data.delta);
+  const riskierLetter =
+    data.riskier === "tie" ? "=" : data.riskier === "A" ? "A" : "B";
+  const deltaColor =
+    data.riskier === "tie" ? "var(--ink-muted)" : "var(--neg)";
+
+  return (
+    <div>
+      {/* Verdict banner */}
+      <section className="mb-10 border hairline-strong p-5 sm:p-6">
+        <div className="smallcaps mb-3">Verdict</div>
+        <p className="font-serif text-[22px] leading-[1.4] text-[color:var(--ink)]">
+          <span className="text-[color:var(--brass)]">“</span>
+          {data.verdict}
+          <span className="text-[color:var(--brass)]">”</span>
+        </p>
+        <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-y-3 gap-x-8 border-t hairline pt-4">
+          <div>
+            <div className="smallcaps mb-1">Chain</div>
+            <div className="text-sm text-[color:var(--ink)]">{chainLabel}</div>
+          </div>
+          <div>
+            <div className="smallcaps mb-1">Scores</div>
+            <div className="text-sm tabular font-mono text-[color:var(--ink)]">
+              <span>A · {data.a.risk.total}</span>
+              <span className="mx-2 text-[color:var(--ink-muted)]">vs</span>
+              <span>B · {data.b.risk.total}</span>
+            </div>
+          </div>
+          <div>
+            <div className="smallcaps mb-1">Gap</div>
+            <div
+              className="text-sm tabular font-mono"
+              style={{ color: deltaColor }}
+            >
+              {absDelta === 0
+                ? "No difference"
+                : `${absDelta} pts → ${riskierLetter}`}
+            </div>
+          </div>
+          <div>
+            <div className="smallcaps mb-1">Driver</div>
+            <div className="text-sm text-[color:var(--ink)]">
+              {data.driverLabel}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Two-column wallet summaries */}
+      <section className="mb-10 grid md:grid-cols-2 gap-5">
+        <WalletCard label="Wallet A" report={data.a} />
+        <WalletCard label="Wallet B" report={data.b} />
+      </section>
+
+      {/* Side-by-side risk breakdown */}
+      <section>
+        <div className="smallcaps mb-3">Risk · component by component</div>
+        <div className="border hairline-strong overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b hairline-strong">
+                <Th className="text-left">Component</Th>
+                <Th className="text-right w-20">A</Th>
+                <Th className="text-right w-20">B</Th>
+                <Th className="text-right w-24">Δ</Th>
+                <Th className="text-left">Notes</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.a.risk.components.map((ca, i) => {
+                const cb = data.b.risk.components[i];
+                const d = (cb?.points ?? 0) - ca.points;
+                const dColor =
+                  d === 0
+                    ? "var(--ink-muted)"
+                    : d > 0
+                      ? "var(--neg)"
+                      : "var(--pos)";
+                return (
+                  <tr key={i} className="border-b hairline last:border-b-0">
+                    <Td className="smallcaps text-[color:var(--ink)]">
+                      {ca.label}
+                    </Td>
+                    <Td className="text-right tabular font-mono text-[color:var(--ink-dim)]">
+                      {ca.points}
+                    </Td>
+                    <Td className="text-right tabular font-mono text-[color:var(--ink-dim)]">
+                      {cb?.points ?? 0}
+                    </Td>
+                    <Td
+                      className="text-right tabular font-mono"
+                      // eslint-disable-next-line react/forbid-dom-props
+                    >
+                      <span style={{ color: dColor }}>
+                        {d > 0 ? `+${d}` : d}
+                      </span>
+                    </Td>
+                    <Td className="text-[color:var(--ink-muted)] text-xs">
+                      <div>
+                        <span className="smallcaps mr-1">A</span>
+                        {ca.note}
+                      </div>
+                      <div className="mt-0.5">
+                        <span className="smallcaps mr-1">B</span>
+                        {cb?.note ?? "—"}
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-white/[0.02]">
+                <Td className="smallcaps text-[color:var(--ink)]">Total</Td>
+                <Td className="text-right tabular font-mono text-[color:var(--ink)] font-semibold">
+                  {data.a.risk.total}
+                </Td>
+                <Td className="text-right tabular font-mono text-[color:var(--ink)] font-semibold">
+                  {data.b.risk.total}
+                </Td>
+                <Td className="text-right tabular font-mono font-semibold">
+                  <span
+                    style={{
+                      color:
+                        data.delta === 0
+                          ? "var(--ink-muted)"
+                          : data.delta > 0
+                            ? "var(--neg)"
+                            : "var(--pos)",
+                    }}
+                  >
+                    {data.delta > 0 ? `+${data.delta}` : data.delta}
+                  </span>
+                </Td>
+                <Td className="text-[color:var(--ink-muted)] text-xs">
+                  Severity · A {data.a.risk.severity} · B {data.b.risk.severity}
+                </Td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function WalletCard({
+  label,
+  report,
+}: {
+  label: string;
+  report: WalletReport;
+}) {
+  const color = severityColor(report.risk.severity);
+  const sevLabel = severityLabel(report.risk.severity);
+  const clamped = Math.max(0, Math.min(100, report.risk.total));
+  const topToken = report.snapshot.tokens[0];
+
+  return (
+    <div className="border hairline-strong p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="smallcaps text-[color:var(--brass)]">{label}</div>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-mono text-[color:var(--ink-dim)] truncate">
+            {shortAddr(report.address)}
+          </span>
+          <CopyButton value={report.address} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <div className="smallcaps mb-1">Portfolio</div>
+          <div className="font-serif text-[26px] leading-none tabular text-[color:var(--ink)]">
+            {formatUsd(report.snapshot.totalUsd)}
+          </div>
+          {topToken && (
+            <div className="mt-1 text-xs text-[color:var(--ink-muted)]">
+              Top · {topToken.symbol}
+            </div>
+          )}
+        </div>
+        <div>
+          <div className="smallcaps mb-1">Risk</div>
+          <div className="flex items-baseline gap-1.5">
+            <div
+              className="font-serif text-[26px] leading-none tabular"
+              style={{ color: `color-mix(in srgb, ${color} 85%, white 15%)` }}
+            >
+              {clamped}
+            </div>
+            <div className="text-xs text-[color:var(--ink-muted)] tabular">
+              / 100
+            </div>
+          </div>
+          <div className="mt-2 h-[2px] bg-[color:var(--rule-strong)] relative">
+            <div
+              className="absolute inset-y-0 left-0"
+              style={{ width: `${clamped}%`, background: color }}
+            />
+          </div>
+          <div
+            className="mt-1 text-xs"
+            style={{ color: `color-mix(in srgb, ${color} 70%, white 30%)` }}
+          >
+            {sevLabel}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 text-xs border-t hairline pt-3">
+        <div>
+          <div className="smallcaps mb-1">Transactions</div>
+          <div className="tabular font-mono text-[color:var(--ink)]">
+            {report.snapshot.txCount.toLocaleString()}
+          </div>
+        </div>
+        <div>
+          <div className="smallcaps mb-1">Approvals</div>
+          <div className="tabular font-mono text-[color:var(--ink)]">
+            {report.snapshot.isEvm ? (
+              report.risk.unlimitedApprovals > 0 ? (
+                <span className="text-[color:var(--neg)]">
+                  {report.risk.unlimitedApprovals} unlimited ·{" "}
+                  {formatUsd(report.risk.approvalsExposureUsd)}
+                </span>
+              ) : (
+                <span className="text-[color:var(--ink-dim)]">None</span>
+              )
+            ) : (
+              <span className="text-[color:var(--ink-muted)]">n/a</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="smallcaps mb-2">Activity mix</div>
+        <ActivityMix mix={report.snapshot.txMix} />
+      </div>
+    </div>
+  );
 }
