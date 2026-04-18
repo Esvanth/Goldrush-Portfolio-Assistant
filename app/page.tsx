@@ -10,22 +10,79 @@ type Token = {
   logoUrl?: string;
 };
 
+type TxCategory =
+  | "swap"
+  | "stablecoin"
+  | "approval"
+  | "bridge"
+  | "transfer"
+  | "other";
+
+type TxMix = Record<TxCategory, number> & { total: number };
+
+type ApprovalRisk = {
+  token: string;
+  tokenName: string;
+  tokenAddress: string;
+  spender: string;
+  spenderLabel: string;
+  allowance: string;
+  valueAtRiskUsd: number;
+  riskFactor: string;
+  isUnlimited: boolean;
+};
+
+type RiskComponent = { label: string; points: number; note: string };
+
+type RiskBreakdown = {
+  total: number;
+  severity: "low" | "moderate" | "elevated";
+  components: RiskComponent[];
+  unlimitedApprovals: number;
+  approvalsExposureUsd: number;
+  topConcentrationPct: number;
+  stableSharePct: number;
+};
+
 type AnalyzeResponse = {
   snapshot: {
     address: string;
     chain: string;
+    isEvm: boolean;
     totalUsd: number;
     tokens: Token[];
     txCount: number;
+    txMix: TxMix;
+    approvals: ApprovalRisk[];
   };
   analysis: {
     summary: string;
     riskScore: number;
+    riskSeverity: "low" | "moderate" | "elevated";
+    riskBreakdown: RiskBreakdown;
     concentration: string;
     insights: string[];
     risks: string[];
     suggestions: string[];
   };
+};
+
+const CATEGORY_LABELS: Record<TxCategory, string> = {
+  swap: "Swaps",
+  stablecoin: "Stablecoin transfers",
+  approval: "Approvals",
+  bridge: "Bridge",
+  transfer: "Transfers",
+  other: "Other",
+};
+
+const CATEGORY_COLORS: Record<TxCategory, string> = {
+  swap: "#c9a44c",
+  stablecoin: "#8f7432",
+  approval: "#b56b5e",
+  bridge: "#7aa877",
+  transfer: "#a8a59f",
+  other: "#5a5550",
 };
 
 const CHAINS = [
@@ -270,7 +327,10 @@ function Results({
                 : undefined
             }
           />
-          <RiskFigure score={data.analysis.riskScore} />
+          <RiskFigure
+            score={data.analysis.riskScore}
+            severity={data.analysis.riskSeverity}
+          />
           <Figure
             label="Activity"
             value={`${data.snapshot.txCount.toLocaleString()} tx`}
@@ -389,6 +449,213 @@ function Results({
           </table>
         </div>
       </section>
+
+      {/* V · Activity mix */}
+      <section className="mt-12">
+        <div className="flex items-baseline justify-between mb-3">
+          <div className="smallcaps">V · Activity</div>
+          <div className="smallcaps tabular">
+            {data.snapshot.txMix.total} classified
+          </div>
+        </div>
+        <ActivityMix mix={data.snapshot.txMix} />
+      </section>
+
+      {/* VI · Approvals — EVM only */}
+      {data.snapshot.isEvm && (
+        <section className="mt-12">
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="smallcaps">VI · Approvals</div>
+            <div className="smallcaps tabular">
+              {data.analysis.riskBreakdown.unlimitedApprovals} unlimited ·{" "}
+              {data.snapshot.approvals.length} total
+            </div>
+          </div>
+          <ApprovalsPanel
+            approvals={data.snapshot.approvals}
+            breakdown={data.analysis.riskBreakdown}
+          />
+        </section>
+      )}
+
+      {/* Risk breakdown — computed, not LLM */}
+      <section className="mt-12">
+        <div className="smallcaps mb-3">Risk · how it was scored</div>
+        <div className="border hairline-strong divide-y hairline">
+          {data.analysis.riskBreakdown.components.map((c, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-4 px-4 py-2.5 text-sm"
+            >
+              <div className="smallcaps w-40 shrink-0">{c.label}</div>
+              <div className="flex-1 text-[color:var(--ink-dim)]">{c.note}</div>
+              <div
+                className="tabular font-mono text-[color:var(--ink)] w-12 text-right"
+                title={`${c.points} points`}
+              >
+                +{c.points}
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center gap-4 px-4 py-3 text-sm bg-white/[0.02]">
+            <div className="smallcaps w-40 shrink-0 text-[color:var(--ink)]">
+              Total
+            </div>
+            <div className="flex-1 text-[color:var(--ink-muted)]">
+              Severity ·{" "}
+              <span className="text-[color:var(--ink)]">
+                {data.analysis.riskSeverity}
+              </span>
+            </div>
+            <div className="tabular font-mono text-[color:var(--ink)] w-12 text-right font-semibold">
+              {data.analysis.riskBreakdown.total}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ActivityMix({ mix }: { mix: TxMix }) {
+  if (mix.total === 0) {
+    return (
+      <div className="border hairline-strong p-5 text-sm text-[color:var(--ink-muted)]">
+        No recent transactions to classify.
+      </div>
+    );
+  }
+  const cats: TxCategory[] = [
+    "swap",
+    "stablecoin",
+    "approval",
+    "bridge",
+    "transfer",
+    "other",
+  ];
+  const nonEmpty = cats.filter((c) => mix[c] > 0);
+
+  return (
+    <div className="border hairline-strong p-5">
+      <div className="flex w-full h-3 overflow-hidden">
+        {cats.map((c) => {
+          const pct = (mix[c] / mix.total) * 100;
+          if (pct === 0) return null;
+          return (
+            <div
+              key={c}
+              style={{
+                width: `${pct}%`,
+                background: CATEGORY_COLORS[c],
+              }}
+              title={`${CATEGORY_LABELS[c]}: ${pct.toFixed(1)}%`}
+            />
+          );
+        })}
+      </div>
+      <ul className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-xs">
+        {nonEmpty.map((c) => {
+          const pct = (mix[c] / mix.total) * 100;
+          return (
+            <li key={c} className="flex items-center gap-2">
+              <span
+                className="w-2 h-2 shrink-0"
+                style={{ background: CATEGORY_COLORS[c] }}
+              />
+              <span className="text-[color:var(--ink)] flex-1 truncate">
+                {CATEGORY_LABELS[c]}
+              </span>
+              <span className="tabular font-mono text-[color:var(--ink-dim)]">
+                {mix[c]} · {pct.toFixed(1)}%
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function ApprovalsPanel({
+  approvals,
+  breakdown,
+}: {
+  approvals: ApprovalRisk[];
+  breakdown: RiskBreakdown;
+}) {
+  if (approvals.length === 0) {
+    return (
+      <div className="border hairline-strong p-5 text-sm text-[color:var(--ink-dim)]">
+        No outstanding token approvals — clean slate.
+      </div>
+    );
+  }
+
+  return (
+    <div className="border hairline-strong">
+      {breakdown.unlimitedApprovals > 0 && (
+        <div className="px-4 py-3 border-b hairline-strong bg-[color:var(--neg)]/[0.08] text-sm">
+          <span className="text-[color:var(--neg)] font-medium">
+            {breakdown.unlimitedApprovals} unlimited approval
+            {breakdown.unlimitedApprovals > 1 ? "s" : ""}
+          </span>
+          <span className="text-[color:var(--ink-dim)]">
+            {" "}
+            · ${Math.round(breakdown.approvalsExposureUsd).toLocaleString()}{" "}
+            exposed
+          </span>
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b hairline-strong">
+              <Th className="text-left">Token</Th>
+              <Th className="text-left">Spender</Th>
+              <Th className="text-right">At risk</Th>
+              <Th className="text-right w-32">Allowance</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {approvals.map((a, i) => (
+              <tr
+                key={i}
+                className="border-b hairline last:border-b-0"
+              >
+                <Td className="font-medium text-[color:var(--ink)]">
+                  {a.token}
+                </Td>
+                <Td className="text-[color:var(--ink-dim)]">
+                  <div className="flex flex-col">
+                    <span className="truncate max-w-[260px]">
+                      {a.spenderLabel || "Unlabeled contract"}
+                    </span>
+                    <span className="text-[11px] font-mono text-[color:var(--ink-muted)] truncate">
+                      {a.spender}
+                    </span>
+                  </div>
+                </Td>
+                <Td className="text-right tabular font-mono text-[color:var(--ink)]">
+                  {a.valueAtRiskUsd > 0
+                    ? `$${Math.round(a.valueAtRiskUsd).toLocaleString()}`
+                    : "—"}
+                </Td>
+                <Td className="text-right">
+                  {a.isUnlimited ? (
+                    <span className="inline-flex items-center gap-1.5 smallcaps text-[color:var(--neg)] border border-[color:var(--neg)]/40 px-1.5 py-0.5">
+                      Unlimited
+                    </span>
+                  ) : (
+                    <span className="smallcaps text-[color:var(--ink-muted)]">
+                      Capped
+                    </span>
+                  )}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -435,14 +702,26 @@ function Figure({
   );
 }
 
-function RiskFigure({ score }: { score: number }) {
+function RiskFigure({
+  score,
+  severity,
+}: {
+  score: number;
+  severity: "low" | "moderate" | "elevated";
+}) {
   const clamped = Math.max(0, Math.min(100, score));
-  const { label, color } =
-    clamped >= 70
-      ? { label: "Elevated", color: "var(--neg)" }
-      : clamped >= 40
-        ? { label: "Moderate", color: "var(--brass)" }
-        : { label: "Contained", color: "var(--pos)" };
+  const color =
+    severity === "elevated"
+      ? "var(--neg)"
+      : severity === "moderate"
+        ? "var(--brass)"
+        : "var(--pos)";
+  const label =
+    severity === "elevated"
+      ? "Elevated"
+      : severity === "moderate"
+        ? "Moderate"
+        : "Contained";
 
   return (
     <div className="p-5">
@@ -468,7 +747,7 @@ function RiskFigure({ score }: { score: number }) {
         className="mt-2 text-xs"
         style={{ color: `color-mix(in srgb, ${color} 70%, white 30%)` }}
       >
-        {label}
+        {label} · computed from GoldRush signals
       </div>
     </div>
   );

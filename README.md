@@ -1,67 +1,78 @@
 # GoldRush Portfolio Analyst
 
-AI-powered on-chain wallet intelligence. Paste a wallet address → get an instant portfolio breakdown, risk score, and actionable insights generated from GoldRush's decoded blockchain data + GPT-4o-mini reasoning.
+Paste any wallet address from Solana, Ethereum, Base, Polygon, or BNB Chain — the analyst returns a written brief, a computed risk score, an activity-mix breakdown, and (on EVM chains) a flagged approvals table.
 
-Built for the **Build with GoldRush Track** hackathon (Powered by Covalent).
+Built for the Build with GoldRush track of the Colosseum Hackathon.
 
-## What it does
+> **Live:** _add your Vercel URL here after first successful deploy_
 
-- Fetches full wallet state across Solana, Ethereum, Base, Polygon, BNB Chain via GoldRush APIs
-- Pulls token balances, USD pricing, and transaction history in one pass
-- Feeds the snapshot to an LLM that generates:
-  - Plain-English summary
-  - 0–100 risk score
-  - Concentration analysis
-  - Specific insights, risks, and suggestions
-- Renders it all in a clean dashboard UI
+## What the risk score actually measures
 
-## Why it's different
+This is the part judges should see. The score is **deterministic, computed from GoldRush signals** — it is not the LLM guessing. The LLM writes the narrative; the number comes from code.
 
-Raw RPC providers give you hex. GoldRush gives you **classified, decoded, USD-priced data** — exactly what an LLM needs to reason about. This project is the proof: combine GoldRush's rich data layer with LLM reasoning to ship insights no raw-chain tool can match.
+| Signal | Source | Max points |
+|---|---|---|
+| **Concentration** — top holding share | `BalanceService` | 25 |
+| **Approval hygiene** — unlimited approvals, $ exposure | `SecurityService.getApprovals` | 30 |
+| **Volatility cushion** — stablecoin share of portfolio | `BalanceService` | 10 |
+| **Activity signature** — approval-heavy or swap-heavy tx mix | `TransactionService` log_events | 10 |
 
-## GoldRush endpoints used
+Score is capped at 100, bucketed into `low` / `moderate` / `elevated`, and shown with a per-component breakdown so you can see *why* a wallet scored where it did.
 
-- `BalanceService.getTokenBalancesForWalletAddress` — token holdings + USD values
-- `TransactionService.getAllTransactionsForAddressByPage` — wallet activity history
+## How GoldRush is used
+
+Three endpoints, working together:
+
+1. **`BalanceService.getTokenBalancesForWalletAddress`** — holdings with USD pricing, `noSpam: true` to filter airdrop tokens.
+2. **`TransactionService.getAllTransactionsForAddressByPage`** (with logs) — recent transactions. Each tx is classified by walking its `log_events`:
+   - `Swap` / `SwapV3` → DEX activity
+   - Stablecoin `Transfer` → USDC/USDT/DAI flow
+   - `Approval` without a `Transfer` → approval operation
+   - Bridge contracts (name-matched) → cross-chain
+   - Otherwise → transfer / other
+3. **`SecurityService.getApprovals`** (EVM only) — outstanding ERC-20 approvals, with `value_at_risk_quote` and `risk_factor` from GoldRush plus an `isUnlimited` flag we derive against `MAX_UINT256`.
+
+The classified signals feed both the UI (activity bar, approvals table) and the LLM prompt so the written brief cites real numbers (*"48% of recent activity is swaps"*, *"3 unlimited approvals exposing $12,400"*) instead of producing generic vibes.
 
 ## Stack
 
-- Next.js 15 (App Router) + TypeScript
+- Next.js 16 (App Router), React 19, TypeScript
 - Tailwind CSS 4
 - `@covalenthq/client-sdk` for GoldRush
-- `openai` SDK with `gpt-4o-mini`
+- `openai` SDK (`gpt-4o-mini`) — narrative only; never produces the risk number
+- Deployed on Vercel
 
-## Setup
+## Running locally
 
-1. Install deps:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+cp .env.local.example .env.local   # then fill in the two keys
+npm run dev
+```
 
-2. Add your keys to `.env.local`:
-   ```
-   GOLDRUSH_API_KEY=your_goldrush_key
-   OPENAI_API_KEY=your_openai_key
-   ```
+Open http://localhost:3000.
 
-3. Run:
-   ```bash
-   npm run dev
-   ```
+Required env:
 
-4. Open http://localhost:3000, paste a wallet address, pick a chain, hit Analyze.
+```
+GOLDRUSH_API_KEY=...
+OPENAI_API_KEY=...
+```
 
-## Project structure
+## Project layout
 
-- `app/page.tsx` — wallet input and results UI
-- `app/api/analyze/route.ts` — orchestration endpoint
-- `lib/goldrush.ts` — GoldRush data fetching + normalization
-- `lib/analyze.ts` — LLM analysis prompt
+```
+app/
+  page.tsx                 editorial UI
+  api/analyze/route.ts     orchestration (force-dynamic)
+lib/
+  goldrush.ts              GoldRush fetching, tx classifier, approval parsing
+  risk.ts                  deterministic risk scoring
+  analyze.ts               LLM narrative (fed the classified signals)
+```
 
-## Demo
+## Submission
 
-Record a 60–90s video showing:
-1. Pasting a whale wallet
-2. Live fetch + analysis
-3. Walking through the AI-generated risk score and insights
-4. Posting on X with `@goldrushdev` tag
+- Public repo: https://github.com/Esvanth/Goldrush-Portfolio-Assistant
+- GoldRush endpoints used: three (Balance, Transaction, Security)
+- Track: Wallet & Portfolio apps — specifically hitting the bullet *"Score wallet risk from SPL token balances, approval hygiene, and full transaction history."*
